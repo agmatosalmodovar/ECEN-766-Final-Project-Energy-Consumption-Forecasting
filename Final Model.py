@@ -1,1 +1,101 @@
-{"nbformat":4,"nbformat_minor":0,"metadata":{"colab":{"provenance":[]},"kernelspec":{"name":"python3","display_name":"Python 3"},"language_info":{"name":"python"}},"cells":[{"cell_type":"code","execution_count":null,"metadata":{"id":"8iy4SCWno6Qz"},"outputs":[],"source":["import pandas as pd\n","import numpy as np\n","import torch\n","import torch.nn as nn\n","from torch.utils.data import DataLoader, Dataset\n","import matplotlib.pyplot as plt\n","from sklearn.preprocessing import MinMaxScaler\n","\n","# Step 1: Data Preparation\n","class EnergyDataset(Dataset):\n","    def __init__(self, data):\n","        self.x = torch.tensor(data[:, 1:], dtype=torch.float32)  # Weather features\n","        self.y = torch.tensor(data[:, 0], dtype=torch.float32)   # Energy_MW\n","\n","    def __len__(self):\n","        return len(self.x)\n","\n","    def __getitem__(self, idx):\n","        return self.x[idx], self.y[idx]\n","\n","# Load the merged CSV\n","df = pd.read_csv('merged_data.csv')\n","df = df.dropna()\n","\n","# Normalize features\n","features = ['Energy_MW', 'TMAX', 'TMIN', 'PRCP']\n","scaler = MinMaxScaler()\n","scaled_data = scaler.fit_transform(df[features])\n","\n","# Create dataset and dataloader\n","dataset = EnergyDataset(scaled_data)\n","dataloader = DataLoader(dataset, batch_size=32, shuffle=True)\n","\n","# Step 2: Transformer Model\n","class TransformerModel(nn.Module):\n","    def __init__(self, input_size=3, hidden_dim=64, num_layers=2, nhead=2):\n","        super(TransformerModel, self).__init__()\n","        self.input_layer = nn.Linear(input_size, hidden_dim)\n","        encoder_layer = nn.TransformerEncoderLayer(d_model=hidden_dim, nhead=nhead)\n","        self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)\n","        self.output_layer = nn.Linear(hidden_dim, 1)\n","\n","    def forward(self, src):\n","        src = src.unsqueeze(1)  # Add sequence dimension\n","        x = self.input_layer(src)\n","        x = self.transformer(x)\n","        x = self.output_layer(x)\n","        return x.squeeze()\n","\n","# Initialize model\n","model = TransformerModel()\n","\n","# Step 3: Training\n","optimizer = torch.optim.Adam(model.parameters(), lr=0.001)\n","loss_fn = nn.MSELoss()\n","\n","epochs = 30\n","for epoch in range(epochs):\n","    model.train()\n","    total_loss = 0\n","    for batch_x, batch_y in dataloader:\n","        optimizer.zero_grad()\n","        output = model(batch_x)\n","        loss = loss_fn(output, batch_y)\n","        loss.backward()\n","        optimizer.step()\n","        total_loss += loss.item()\n","    print(f\"Epoch {epoch+1}/{epochs}, Loss: {total_loss/len(dataloader):.6f}\")\n","\n","# Step 4: Prediction on User-Provided Weather Data\n","def predict_energy(user_weather_file):\n","    user_df = pd.read_csv(user_weather_file)\n","    user_df = user_df.dropna()\n","\n","    # Select and normalize features\n","    user_weather = user_df[['TMAX', 'TMIN', 'PRCP']]\n","    weather_scaled = scaler.transform(\n","        np.hstack([np.zeros((len(user_weather), 1)), user_weather])\n","    )[:, 1:]  # Only weather columns\n","\n","    user_weather_tensor = torch.tensor(weather_scaled, dtype=torch.float32)\n","\n","    model.eval()\n","    with torch.no_grad():\n","        predictions = model(user_weather_tensor)\n","\n","    predictions = predictions.numpy()\n","\n","    # Inverse transform\n","    inverse_scaled = np.zeros((len(predictions), 4))\n","    inverse_scaled[:, 0] = predictions\n","    original_scale = scaler.inverse_transform(inverse_scaled)[:, 0]\n","\n","    user_df['Predicted_Energy_MW'] = original_scale\n","\n","    print(user_df[['Date', 'Predicted_Energy_MW']])\n","    user_df.to_csv('predicted_energy_output.csv', index=False)\n","    print(\"Predictions saved to predicted_energy_output.csv\")\n","\n","# Example usage after training\n","predict_energy('user_uploaded_weather.csv')"]}]}
+import pandas as pd
+import numpy as np
+import torch
+import torch.nn as nn
+from torch.utils.data import DataLoader, Dataset
+import matplotlib.pyplot as plt
+from sklearn.preprocessing import MinMaxScaler
+
+# Step 1: Data Preparation
+class EnergyDataset(Dataset):
+    def __init__(self, data):
+        self.x = torch.tensor(data[:, 1:], dtype=torch.float32)  # Weather features
+        self.y = torch.tensor(data[:, 0], dtype=torch.float32)   # Energy_MW
+
+    def __len__(self):
+        return len(self.x)
+
+    def __getitem__(self, idx):
+        return self.x[idx], self.y[idx]
+
+# Load the merged CSV
+df = pd.read_csv('merged_data.csv')
+df = df.dropna()
+
+# Normalize features
+features = ['Energy_MW', 'TMAX', 'TMIN', 'PRCP']
+scaler = MinMaxScaler()
+scaled_data = scaler.fit_transform(df[features])
+
+# Create dataset and dataloader
+dataset = EnergyDataset(scaled_data)
+dataloader = DataLoader(dataset, batch_size=32, shuffle=True)
+
+# Step 2: Transformer Model
+class TransformerModel(nn.Module):
+    def __init__(self, input_size=3, hidden_dim=64, num_layers=2, nhead=2):
+        super(TransformerModel, self).__init__()
+        self.input_layer = nn.Linear(input_size, hidden_dim)
+        encoder_layer = nn.TransformerEncoderLayer(d_model=hidden_dim, nhead=nhead)
+        self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
+        self.output_layer = nn.Linear(hidden_dim, 1)
+
+    def forward(self, src):
+        src = src.unsqueeze(1)  # Add sequence dimension
+        x = self.input_layer(src)
+        x = self.transformer(x)
+        x = self.output_layer(x)
+        return x.squeeze()
+
+# Initialize model
+model = TransformerModel()
+
+# Step 3: Training
+optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+loss_fn = nn.MSELoss()
+
+epochs = 30
+for epoch in range(epochs):
+    model.train()
+    total_loss = 0
+    for batch_x, batch_y in dataloader:
+        optimizer.zero_grad()
+        output = model(batch_x)
+        loss = loss_fn(output, batch_y)
+        loss.backward()
+        optimizer.step()
+        total_loss += loss.item()
+    print(f"Epoch {epoch+1}/{epochs}, Loss: {total_loss/len(dataloader):.6f}")
+
+# Step 4: Prediction on User-Provided Weather Data
+def predict_energy(user_weather_file):
+    user_df = pd.read_csv(user_weather_file)
+    user_df = user_df.dropna()
+
+    # Select and normalize features
+    user_weather = user_df[['TMAX', 'TMIN', 'PRCP']]
+    weather_scaled = scaler.transform(
+        np.hstack([np.zeros((len(user_weather), 1)), user_weather])
+    )[:, 1:]  # Only weather columns
+
+    user_weather_tensor = torch.tensor(weather_scaled, dtype=torch.float32)
+
+    model.eval()
+    with torch.no_grad():
+        predictions = model(user_weather_tensor)
+
+    predictions = predictions.numpy()
+
+    # Inverse transform
+    inverse_scaled = np.zeros((len(predictions), 4))
+    inverse_scaled[:, 0] = predictions
+    original_scale = scaler.inverse_transform(inverse_scaled)[:, 0]
+
+    user_df['Predicted_Energy_MW'] = original_scale
+
+    print(user_df[['Date', 'Predicted_Energy_MW']])
+    user_df.to_csv('predicted_energy_output.csv', index=False)
+    print("Predictions saved to predicted_energy_output.csv")
+
+# Example usage after training
+predict_energy('user_uploaded_weather.csv')
